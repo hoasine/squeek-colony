@@ -37,7 +37,7 @@ Open `http://localhost:3000`. The first request creates Lantern Hollow and its o
 - `AUTH_SECRET`: random value of at least 32 characters for signing sessions.
 - `CRON_SECRET`: bearer token accepted by the settlement worker.
 - `SQUEEK_API_URL`: defaults to `https://api.squeekchain.com`.
-- `NEXT_PUBLIC_SEPOLIA_RPC_URL`: reserved for direct-chain verification and holder features.
+- `NEXT_PUBLIC_SEPOLIA_RPC_URL`: Sepolia endpoint used when the public Squeek API is unreachable.
 - `NEXT_PUBLIC_SITE_URL`: canonical public origin used by social sharing metadata.
 
 Do not commit `.env`.
@@ -54,7 +54,7 @@ curl -X POST http://localhost:3000/api/cron/resolve \
 Opening the colony also settles any closed rounds, so the free Vercel deployment does not depend on
 a paid minute-by-minute cron. The protected endpoint remains available and is idempotent.
 
-The worker matches local rounds against the canonical events returned by `/v1/core`, records the
+The worker matches local rounds against `BatchSettled` and `RoundRecorded` events from `/v1/core`, or from Sepolia logs when that API is blocked, records the
 transaction hash, runs the deterministic game engine and updates the colony inside a database
 transaction. If the covering proof is unavailable, the worker leaves the round pending rather than
 guessing.
@@ -77,9 +77,9 @@ prisma/schema.prisma   persistent backend model
 
 ## Production
 
-Deploy on Vercel's free Hobby plan with a Neon Postgres database. Attach the `.asia` domain in
-Vercel, then add the `CNAME` Vercel provides at Porkbun. Squeekchain's verification `TXT` record is
-also added at Porkbun. See `SUBMISSION.md`.
+Deploy on Vercel's free Hobby plan with a Neon Postgres database. The public domain is
+`squeekcolony.asia`. Point its nameservers at `ns1.vercel-dns.com` and `ns2.vercel-dns.com`, then
+add Squeekchain's verification `TXT` record in Vercel. See `SUBMISSION.md`.
 
 ## Verification
 
@@ -97,8 +97,8 @@ outcome, and all wallet interactions are non-custodial.
 
 See `SUBMISSION.md` for:
 
-- Railway deployment with a persistent database volume;
-- the one-minute settlement cron configuration;
+- the free Vercel and Neon deployment;
+- settlement when the colony page is opened;
 - listing copy and pre-submission tests;
 - direct Genesis verification using DNS, a page tag and a public repository;
 - the alternative IMD wallet-ownership route.

@@ -6,7 +6,9 @@ import { currentRoundWindow, getCoreFeed, getSqueekStatus } from "@/lib/squeekch
 const COLONY_ID = "lantern-hollow";
 
 export async function ensureWorld() {
-  const colony = await db.colony.upsert({
+  let colony;
+  try {
+    colony = await db.colony.upsert({
     where: { id: COLONY_ID },
     update: {},
     create: {
@@ -42,20 +44,45 @@ export async function ensureWorld() {
       },
     },
   });
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
+    if (code !== "P2002") throw error;
+    colony = await db.colony.findUniqueOrThrow({ where: { id: COLONY_ID } });
+  }
 
   const [status, core] = await Promise.all([
     getSqueekStatus(),
     getCoreFeed().catch(() => null),
   ]);
+  if (!core && status.source !== "live") {
+    const endsAt = Math.ceil(Date.now() / 600_000) * 600_000;
+    return {
+      colony,
+      round: {
+        id: "pending-feed",
+        colonyId: colony.id,
+        chainRound: 0,
+        startsAt: new Date(endsAt - 600_000),
+        endsAt: new Date(endsAt),
+        settledAt: null,
+        workUnits: null,
+        outcome: null,
+        transactionHash: null,
+        resolution: null,
+      },
+      status,
+      core,
+    };
+  }
   const settledThroughRound = core?.settledThroughRound ?? status.settledThroughRound;
   const roundNumber = core
     ? Math.max(
         settledThroughRound + 1,
-        Math.floor(
-          (Date.now() / 1_000 - core.genesisTimestamp) / core.roundDuration,
-        ),
+        Math.floor((Date.now() / 1_000 - core.genesisTimestamp) / core.roundDuration),
       )
-    : settledThroughRound + 1 || Math.floor(Date.now() / 600_000);
+    : status.source === "live" && status.settledThroughRound > 0
+      ? status.settledThroughRound + 1
+      : Math.floor(Date.now() / 600_000);
   const window = currentRoundWindow(
     roundNumber,
     core
@@ -65,11 +92,18 @@ export async function ensureWorld() {
         }
       : undefined,
   );
-  const round = await db.gameRound.upsert({
-    where: { chainRound: roundNumber },
-    update: {},
-    create: { ...window, colonyId: colony.id },
-  });
+  let round;
+  try {
+    round = await db.gameRound.upsert({
+      where: { chainRound: roundNumber },
+      update: {},
+      create: { ...window, colonyId: colony.id },
+    });
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
+    if (code !== "P2002") throw error;
+    round = await db.gameRound.findUniqueOrThrow({ where: { chainRound: roundNumber } });
+  }
   return { colony, round, status, core };
 }
 

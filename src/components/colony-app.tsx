@@ -116,24 +116,115 @@ export function ColonyApp() {
     }
   }, []);
 
+  const refreshPublicWheel = useCallback(async () => {
+    try {
+      const [statusResponse, coreResponse] = await Promise.all([
+        fetch("https://api.squeekchain.com/v1/status"),
+        fetch("https://api.squeekchain.com/v1/core"),
+      ]);
+      if (!statusResponse.ok || !coreResponse.ok) return;
+      const data = (await statusResponse.json()) as {
+        generatedAt: string;
+        measurement: {
+          freshness: string;
+          coreStatus: string;
+          rpmMilli: number;
+          speedMmPerSecond: number;
+          cumulativeWorkUnits: string;
+          distanceMm: number;
+        };
+        builder: {
+          anchor: {
+            blockHeight: string;
+            blockProgress: string;
+            settledThroughRound: string;
+            transactionHash: string;
+          };
+        };
+      };
+      const core = (await coreResponse.json()) as {
+        installationId: string;
+        chain: { chainId: string; safeThroughBlock: string };
+        identities: { core: string };
+        configuration: { genesisTimestamp: string; roundDuration: string };
+        core: { settledThroughRound: string };
+      };
+      const duration = Number(core.configuration.roundDuration) * 1000;
+      const genesis = Number(core.configuration.genesisTimestamp) * 1000;
+      const chainRound = Math.max(
+        Number(core.core.settledThroughRound) + 1,
+        Math.floor((Date.now() - genesis) / duration),
+      );
+      const startsAt = genesis + chainRound * duration;
+      setWorld((current) =>
+        current
+          ? {
+              ...current,
+              round:
+                current.status.source === "live"
+                  ? current.round
+                  : {
+                      ...current.round,
+                      chainRound,
+                      startsAt: new Date(startsAt).toISOString(),
+                      endsAt: new Date(startsAt + duration).toISOString(),
+                    },
+              status: {
+                online: data.measurement.freshness === "online",
+                source: "live",
+                generatedAt: data.generatedAt,
+                isRunning: data.measurement.coreStatus === "SPINNING",
+                rpm: data.measurement.rpmMilli / 1_000,
+                speedMps: data.measurement.speedMmPerSecond / 1_000,
+                totalWork: Number(data.measurement.cumulativeWorkUnits),
+                distanceKm: data.measurement.distanceMm / 1_000_000,
+                blockHeight: Number(data.builder.anchor.blockHeight),
+                blockProgress: Number(data.builder.anchor.blockProgress) / 1_000_000_000,
+                settledThroughRound: Number(data.builder.anchor.settledThroughRound),
+                transactionHash: data.builder.anchor.transactionHash,
+              },
+              proof: current.proof ?? {
+                installationId: core.installationId,
+                chainId: Number(core.chain.chainId),
+                coreAddress: core.identities.core,
+                safeThroughBlock: Number(core.chain.safeThroughBlock),
+              },
+            }
+          : current,
+      );
+    } catch {
+      // The server feed remains visible when the browser cannot reach Squeekchain.
+    }
+  }, []);
+
+  const syncWorld = useCallback(
+    async (quiet = false) => {
+      await loadWorld(quiet);
+      await refreshPublicWheel();
+    },
+    [loadWorld, refreshPublicWheel],
+  );
+
   useEffect(() => {
     const startup = window.setTimeout(() => {
       void Promise.all([
-        loadWorld(),
+        syncWorld(),
         fetch("/api/auth/session", { cache: "no-store" })
           .then((response) => response.json())
           .then((data: { player: Player | null }) => setPlayer(data.player))
           .catch(() => null),
       ]);
     }, 0);
-    const poll = window.setInterval(() => void loadWorld(true), 15_000);
+    const poll = window.setInterval(() => {
+      void syncWorld(true);
+    }, 15_000);
     const clock = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => {
       window.clearTimeout(startup);
       window.clearInterval(poll);
       window.clearInterval(clock);
     };
-  }, [loadWorld]);
+  }, [syncWorld]);
 
   const timing = (() => {
     if (!world) return { remaining: 0, progress: 0 };
@@ -178,7 +269,7 @@ export function ColonyApp() {
         throw new Error(verified.error ?? "Wallet signature was not accepted.");
       }
       setPlayer(verified.player);
-      await loadWorld(true);
+      await syncWorld(true);
       toast.success("Welcome to the council. Your signature cost no gas.");
     } catch (reason) {
       const message =
@@ -196,7 +287,7 @@ export function ColonyApp() {
   async function disconnect() {
     await fetch("/api/auth/session", { method: "DELETE" });
     setPlayer(null);
-    await loadWorld(true);
+    await syncWorld(true);
   }
 
   async function chooseAction(action: ActionKind) {
@@ -213,7 +304,7 @@ export function ColonyApp() {
       });
       const data = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(data.error ?? "The council could not record your choice.");
-      await loadWorld(true);
+      await syncWorld(true);
       toast.success(`${actionMeta[action].label} chosen for this round.`);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "Vote failed.");

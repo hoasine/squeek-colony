@@ -1,4 +1,14 @@
+import { createPublicClient, http, parseAbi, type Address } from "viem";
+import { sepolia } from "viem/chains";
 import { z } from "zod";
+
+const CORE_ADDRESS: Address = "0x980b4424c007caf7a1f3670b48c8eaef7ebc3d44";
+const chainAbi = parseAbi([
+  "function configuration() view returns ((bytes32 streamId, uint64 genesisTimestamp, uint64 roundDuration, uint64 maxWorkPerRound, uint16 maxRoundsPerBatch, address guardian, address reporter, uint32 initialWorkPerThousandBlocks, uint64 targetBlocksPerActiveRound, uint64 difficultySmoothingRounds, uint96 blockUnitsPerBlock))",
+  "function state() view returns ((uint64 settledThroughRound, uint64 cumulativeWork, uint96 cumulativeBlockUnits, uint64 blockHeight, uint96 blockProgress, uint32 workPerThousandBlocks, uint256 authorizationNonce, bool paused))",
+  "event BatchSettled(bytes32 indexed digest, address indexed reporter, uint64 indexed settledThroughRound, uint256 nonce, uint64 previousSettledThroughRound, uint16 activeRoundCount, uint64 cumulativeWork, uint96 cumulativeBlockUnits)",
+  "event RoundRecorded(uint64 indexed roundId, uint64 work, uint64 cumulativeWork, uint96 cumulativeBlockUnits, uint32 workPerThousandBlocks, bytes32 dataHash)",
+]);
 
 const statusSchema = z.object({
   generatedAt: z.string(),
@@ -102,10 +112,14 @@ export async function getSqueekStatus(): Promise<SqueekStatus> {
   try {
     const base = process.env.SQUEEK_API_URL ?? "https://api.squeekchain.com";
     const response = await fetch(`${base}/v1/status`, {
-      next: { revalidate: 10 },
-      signal: AbortSignal.timeout(5_000),
+      cache: "no-store",
+      headers: { accept: "application/json", "user-agent": "SqueekColony/1.0" },
+      signal: AbortSignal.timeout(2_500),
     });
-    if (!response.ok) throw new Error(`Squeek API returned ${response.status}`);
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 180);
+      throw new Error(`Squeek API returned ${response.status}: ${detail}`);
+    }
     const data = statusSchema.parse(await response.json());
     return {
       online: data.measurement.freshness === "online",
@@ -121,8 +135,14 @@ export async function getSqueekStatus(): Promise<SqueekStatus> {
       settledThroughRound: Number(data.builder.anchor.settledThroughRound),
       transactionHash: data.builder.anchor.transactionHash,
     };
-  } catch {
-    return { ...FALLBACK, generatedAt: new Date().toISOString() };
+  } catch (error) {
+    console.error("Squeek status unavailable", error);
+    try {
+      return (await readChainView()).status;
+    } catch (chainError) {
+      console.error("Squeek chain read unavailable", chainError);
+      return { ...FALLBACK, generatedAt: new Date().toISOString() };
+    }
   }
 }
 
@@ -130,13 +150,17 @@ function argument(event: CoreEvent, name: string) {
   return event.arguments.find((item) => item.name === name)?.value;
 }
 
-export async function getCoreFeed(fresh = false): Promise<CoreFeed> {
+async function getCoreFeedFromApi(): Promise<CoreFeed> {
   const base = process.env.SQUEEK_API_URL ?? "https://api.squeekchain.com";
   const response = await fetch(`${base}/v1/core`, {
-    ...(fresh ? { cache: "no-store" as const } : { next: { revalidate: 10 } }),
-    signal: AbortSignal.timeout(5_000),
+    cache: "no-store",
+    headers: { accept: "application/json", "user-agent": "SqueekColony/1.0" },
+    signal: AbortSignal.timeout(2_500),
   });
-  if (!response.ok) throw new Error(`Squeek Core API returned ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 180);
+    throw new Error(`Squeek Core API returned ${response.status}: ${detail}`);
+  }
   const data = coreSchema.parse(await response.json());
   return {
     installationId: data.installationId,
@@ -148,6 +172,97 @@ export async function getCoreFeed(fresh = false): Promise<CoreFeed> {
     settledThroughRound: Number(data.core.settledThroughRound),
     events: data.events,
   };
+}
+
+type ChainView = { status: SqueekStatus; feed: CoreFeed };
+
+let chainCache: { at: number; value: ChainView } | null = null;
+let chainRead: Promise<ChainView> | null = null;
+
+function readChainView() {
+  if (chainCache && Date.now() - chainCache.at < 20_000) return Promise.resolve(chainCache.value);
+  if (!chainRead) {
+    chainRead = loadChainView()
+      .then((value) => {
+        chainCache = { at: Date.now(), value };
+        return value;
+      })
+      .finally(() => {
+        chainRead = null;
+      });
+  }
+  return chainRead;
+}
+
+async function loadChainView(): Promise<ChainView> {
+  const rpc = createPublicClient({
+    chain: sepolia,
+    transport: http(
+      process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com",
+    ),
+  });
+  const [configuration, state, latest] = await Promise.all([
+    rpc.readContract({ address: CORE_ADDRESS, abi: chainAbi, functionName: "configuration" }),
+    rpc.readContract({ address: CORE_ADDRESS, abi: chainAbi, functionName: "state" }),
+    rpc.getBlockNumber(),
+  ]);
+  const logs = await rpc.getLogs({
+    address: CORE_ADDRESS,
+    events: [chainAbi[2], chainAbi[3]],
+    fromBlock: latest > BigInt(4000) ? latest - BigInt(4000) : BigInt(0),
+    toBlock: latest,
+  });
+  const events: CoreEvent[] = logs.flatMap((log) =>
+    log.args
+      ? [
+          {
+            eventName: log.eventName,
+            transactionHash: log.transactionHash,
+            blockNumber: log.blockNumber.toString(),
+            arguments: Object.entries(log.args).map(([name, value]) => ({
+              name,
+              value: typeof value === "bigint" ? value.toString() : String(value),
+            })),
+          },
+        ]
+      : [],
+  );
+  const latestBatch = [...logs].reverse().find((log) => log.eventName === "BatchSettled");
+  return {
+    feed: {
+      installationId: configuration.streamId,
+      chainId: sepolia.id,
+      safeThroughBlock: Number(latest > BigInt(12) ? latest - BigInt(12) : latest),
+      coreAddress: CORE_ADDRESS,
+      genesisTimestamp: Number(configuration.genesisTimestamp),
+      roundDuration: Number(configuration.roundDuration),
+      settledThroughRound: Number(state.settledThroughRound),
+      events,
+    },
+    status: {
+      online: true,
+      source: "live",
+      generatedAt: new Date().toISOString(),
+      isRunning: false,
+      rpm: 0,
+      speedMps: 0,
+      totalWork: Number(state.cumulativeWork),
+      distanceKm: 0,
+      blockHeight: Number(state.blockHeight),
+      blockProgress: Number(state.blockProgress) / 1_000_000_000,
+      settledThroughRound: Number(state.settledThroughRound),
+      transactionHash: latestBatch?.transactionHash ?? null,
+    },
+  };
+}
+
+export async function getCoreFeed(): Promise<CoreFeed> {
+  try {
+    return await getCoreFeedFromApi();
+  } catch (error) {
+    console.error("Squeek core API unavailable", error);
+    return (await readChainView()).feed;
+  }
 }
 
 export function proofForRound(feed: CoreFeed, round: number): RoundProof | null {

@@ -50,14 +50,14 @@ about $1.03 for the first year.
    CRON_SECRET=<a different long random value>
    SQUEEK_API_URL=https://api.squeekchain.com
    NEXT_PUBLIC_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
-   NEXT_PUBLIC_SITE_URL=https://YOUR_NAME.asia
+   NEXT_PUBLIC_SITE_URL=https://squeekcolony.asia
    ```
 
-4. Deploy, then add `YOUR_NAME.asia` in Vercel Domains.
-5. At Porkbun, add the `CNAME` record Vercel displays. Add Squeekchain's verification `TXT` record
-   there too when Genesis generates it.
+4. Deploy, then add `squeekcolony.asia` in Vercel Domains.
+5. At the registrar, set the nameservers to `ns1.vercel-dns.com` and `ns2.vercel-dns.com`.
+   The Genesis verification `TXT` record is added in Vercel after those nameservers are active.
 6. Open the site once. Closed rounds settle from that visit, so no paid cron is required.
-7. Check `https://YOUR_NAME.asia/api/health`.
+7. Check `https://squeekcolony.asia/api/health`.
 
 The optional `/api/cron/resolve` endpoint still accepts `Authorization: Bearer CRON_SECRET`.
 

@@ -15,7 +15,7 @@ export async function settleDueRounds() {
   });
   if (due.length === 0) return { resolved: [] as number[], pending: [] as number[] };
 
-  const feed = await getCoreFeed(true);
+  const feed = await getCoreFeed();
   const resolved: number[] = [];
   const pending: number[] = [];
 
