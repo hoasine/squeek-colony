@@ -34,36 +34,32 @@ Server game / community game / living story
 Without SqueekCore settlements the colony cannot advance. The chain result is a required game input,
 not a dashboard decoration: it changes resource outcomes, story chapters and strategy.
 
-## Deploy with Railway
+## Deploy for free
 
-The repository includes a Dockerfile. Railway is a straightforward option because a persistent
-volume can hold the included SQLite database.
+The app runs on Vercel Hobby and Neon Postgres. Buy the `.asia` domain at Porkbun; the live price is
+about $1.03 for the first year.
 
-1. Publish this repository to a **public GitHub repository**.
-2. In Railway choose **New project → Deploy from GitHub repo**.
-3. Add a persistent volume mounted at `/data`.
-4. Set these variables:
+1. Register an available name such as `squeekcolony.asia` at Porkbun and turn off auto-renew if you
+   only want one year.
+2. Create a free Neon project and copy its pooled Postgres connection string.
+3. Import `hoasine/squeek-colony` in Vercel and set:
 
    ```text
-   DATABASE_URL=file:/data/colony.db
+   DATABASE_URL=<Neon pooled connection string>
    AUTH_SECRET=<at least 32 random characters>
    CRON_SECRET=<a different long random value>
    SQUEEK_API_URL=https://api.squeekchain.com
    NEXT_PUBLIC_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
-   NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN
+   NEXT_PUBLIC_SITE_URL=https://YOUR_NAME.asia
    ```
 
-5. Generate a Railway domain and check `https://YOUR_DOMAIN/api/health`.
-6. Add your own custom domain in Railway. Direct Squeekchain verification requires control of DNS.
-7. Create a job at cron-job.org:
-   - URL: `https://YOUR_DOMAIN/api/cron/resolve`
-   - Method: `POST`
-   - Schedule: every minute
-   - Header: `Authorization: Bearer YOUR_CRON_SECRET`
-8. Wait for a SqueekCore round to settle. Confirm that **Verified outcomes** shows a receipt.
+4. Deploy, then add `YOUR_NAME.asia` in Vercel Domains.
+5. At Porkbun, add the `CNAME` record Vercel displays. Add Squeekchain's verification `TXT` record
+   there too when Genesis generates it.
+6. Open the site once. Closed rounds settle from that visit, so no paid cron is required.
+7. Check `https://YOUR_NAME.asia/api/health`.
 
-For production scale across several app instances, migrate Prisma from SQLite to managed PostgreSQL.
-For a campaign build on one Railway instance, the persistent-volume setup is sufficient.
+The optional `/api/cron/resolve` endpoint still accepts `Authorization: Bearer CRON_SECRET`.
 
 ## Test before submission
 

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { ACTIONS, type ActionKind } from "@/lib/game";
+import { settleDueRounds } from "@/lib/settlement";
 import { currentRoundWindow, getCoreFeed, getSqueekStatus } from "@/lib/squeekchain";
 
 const COLONY_ID = "lantern-hollow";
@@ -74,6 +75,8 @@ export async function ensureWorld() {
 
 export async function getWorld(playerId?: string) {
   const { colony, round, status, core } = await ensureWorld();
+  await settleDueRounds().catch(() => undefined);
+  const freshColony = await db.colony.findUniqueOrThrow({ where: { id: colony.id } });
   const [actions, chronicles, citizens, verifiedRounds] = await Promise.all([
     db.action.findMany({
       where: { roundId: round.id },
@@ -111,7 +114,7 @@ export async function getWorld(playerId?: string) {
 
   return {
     colony: {
-      ...colony,
+      ...freshColony,
       buildings: JSON.parse(colony.buildings) as Record<string, number>,
     },
     round: {

@@ -33,7 +33,7 @@ Open `http://localhost:3000`. The first request creates Lantern Hollow and its o
 
 ## Environment
 
-- `DATABASE_URL`: Prisma database URL. The included schema uses SQLite for a zero-setup local build.
+- `DATABASE_URL`: Neon Postgres connection string. Use the pooled URL in production.
 - `AUTH_SECRET`: random value of at least 32 characters for signing sessions.
 - `CRON_SECRET`: bearer token accepted by the settlement worker.
 - `SQUEEK_API_URL`: defaults to `https://api.squeekchain.com`.
@@ -51,8 +51,8 @@ curl -X POST http://localhost:3000/api/cron/resolve \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
-In production, schedule this once per minute with the hosting platform's cron service. Calls are
-idempotent: already resolved rounds are not processed again.
+Opening the colony also settles any closed rounds, so the free Vercel deployment does not depend on
+a paid minute-by-minute cron. The protected endpoint remains available and is idempotent.
 
 The worker matches local rounds against the canonical events returned by `/v1/core`, records the
 transaction hash, runs the deterministic game engine and updates the colony inside a database
@@ -75,12 +75,11 @@ src/lib/world.ts       world bootstrap and read model
 prisma/schema.prisma   persistent backend model
 ```
 
-## Production database
+## Production
 
-SQLite keeps development and judging setup simple and complete. For horizontally scaled production,
-change the Prisma datasource provider to `postgresql`, set a managed PostgreSQL `DATABASE_URL`, and
-run a Prisma migration. No application query needs to change. A single-instance deployment with a
-persistent disk can use the included SQLite configuration as-is.
+Deploy on Vercel's free Hobby plan with a Neon Postgres database. Attach the `.asia` domain in
+Vercel, then add the `CNAME` Vercel provides at Porkbun. Squeekchain's verification `TXT` record is
+also added at Porkbun. See `SUBMISSION.md`.
 
 ## Verification
 
