@@ -17,6 +17,9 @@ export const metadata: Metadata = {
     title: "Squeek Colony",
     description: "A living cooperative world powered by real Squeekchain rounds.",
   },
+  other: {
+    "squeekchain-project": "6a6640e9-c1b6-4550-9dae-23729a14a018",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

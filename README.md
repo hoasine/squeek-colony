@@ -1,5 +1,7 @@
 # Squeek Colony
 
+squeekchain-project: 6a6640e9-c1b6-4550-9dae-23729a14a018
+
 A persistent cooperative world powered by real Squeekchain rounds. Players sign in with a free
 wallet signature, choose one colony action per ten-minute round, and let Squeektoshi's settled work
 decide how Lantern Hollow changes.
