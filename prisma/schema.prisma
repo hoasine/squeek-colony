@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  displayName String?
+  xp          Int      @default(0)
+  joinedAt    DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+  actions     Action[]
+}
+
+model Colony {
+  id         String      @id
+  name       String
+  day        Int         @default(1)
+  food       Int         @default(140)
+  timber     Int         @default(90)
+  energy     Int         @default(72)
+  morale     Int         @default(84)
+  threat     Int         @default(18)
+  buildings  String      @default("{}")
+  updatedAt  DateTime    @updatedAt
+  rounds     GameRound[]
+  chronicles Chronicle[]
+}
+
+model GameRound {
+  id             String   @id
+  colonyId       String
+  chainRound     Int      @unique
+  startsAt       DateTime
+  endsAt         DateTime
+  settledAt      DateTime?
+  workUnits      Int?
+  outcome        String?
+  transactionHash String?
+  resolution     String?
+  colony         Colony   @relation(fields: [colonyId], references: [id])
+  actions        Action[]
+
+  @@index([colonyId, endsAt])
+}
+
+model Action {
+  id        String    @id @default(cuid())
+  playerId  String
+  roundId   String
+  kind      String
+  createdAt DateTime  @default(now())
+  player    Player    @relation(fields: [playerId], references: [id])
+  round     GameRound @relation(fields: [roundId], references: [id])
+
+  @@unique([playerId, roundId])
+  @@index([roundId, kind])
+}
+
+model Chronicle {
+  id        String   @id @default(cuid())
+  colonyId  String
+  round     Int
+  title     String
+  body      String
+  mood      String
+  createdAt DateTime @default(now())
+  colony    Colony   @relation(fields: [colonyId], references: [id])
+
+  @@unique([colonyId, round])
+}
+
+model AuthChallenge {
+  address   String   @id
+  nonce     String
+  message   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
